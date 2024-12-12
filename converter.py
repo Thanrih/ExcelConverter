@@ -12,22 +12,46 @@ def selecionar_arquivo():
     )
     if excel_file:
         label_arquivo['text'] = f"Arquivo selecionado: {excel_file}"
+        carregar_colunas()
     else:
         label_arquivo['text'] = "Nenhum arquivo selecionado."
 
 
+def carregar_colunas():
+    """Carrega as colunas do arquivo Excel e exibe na Listbox"""
+    try:
+        # Carregar o arquivo Excel
+        try:
+            df = pd.read_excel(excel_file, engine='openpyxl')
+        except:
+            df = pd.read_excel(excel_file, engine='xlrd')
+
+        # Preencher o Listbox com as colunas
+        listbox_colunas.delete(0, tk.END)  # Limpa o Listbox
+        for coluna in df.columns:
+            listbox_colunas.insert(tk.END, coluna)
+
+    except Exception as e:
+        messagebox.showerror("Erro", f"Erro ao carregar colunas: {str(e)}")
+
+
 def formatar_dados(df):
-    #Formata os campos 'MES_ANO_DIREITO' (data) e 'CPF'
+    """
+    Formata os campos 'MES_ANO_DIREITO' (data), 'CPF' e 'CNPJ' no DataFrame.
+    """
     # Formatar a coluna de data
     if 'MES_ANO_DIREITO' in df.columns:
-        df['MES_ANO_DIREITO'] = pd.to_datetime(df['MES_ANO_DIREITO'], errors='coerce').dt.strftime('%d/%m/%Y')
+        df['MES_ANO_DIREITO'] = pd.to_datetime(df['MES_ANO_DIREITO'], errors='coerce')
+        df['MES_ANO_DIREITO'] = df['MES_ANO_DIREITO'].fillna("").dt.strftime('%d/%m/%Y')
 
-    # Formatar o CPF com pontos e traço
+    # Formatar o CPF
     if 'CPF' in df.columns:
-        df['CPF'] = df['CPF'].astype(str).str.zfill(11)  # Garante 11 dígitos
-        df['CPF'] = df['CPF'].str.replace(
-            r'(\d{3})(\d{3})(\d{3})(\d{2})', r'\1.\2.\3-\4', regex=True
-        )
+        df['CPF'] = df['CPF'].fillna("").astype(str).str.replace(r'\.0$', '', regex=True)
+        df['CPF'] = df['CPF'].apply(lambda x: x.zfill(11) if x.isdigit() else "")
+
+    # Formatar o CNPJ
+    if 'CNPJ' in df.columns:
+        df['CNPJ'] = df['CNPJ'].fillna("").astype(str).str.replace(r'[^\d]', '', regex=True)
 
     return df
 
@@ -39,18 +63,19 @@ def processar_arquivo():
         if not excel_file:
             raise ValueError("Por favor, selecione um arquivo Excel.")
 
-        # Carrega o arquivo Excel
+        # Carregar o arquivo Excel
         try:
             df = pd.read_excel(excel_file, engine='openpyxl')
         except:
             df = pd.read_excel(excel_file, engine='xlrd')
 
         # Obter colunas selecionadas
-        colunas = entry_colunas.get().split(',')
-        colunas = [col.strip() for col in colunas]  # Remove espaços extras
+        colunas_selecionadas = [listbox_colunas.get(i) for i in listbox_colunas.curselection()]
+        if not colunas_selecionadas:
+            raise ValueError("Por favor, selecione pelo menos uma coluna.")
 
         # Filtrar as colunas
-        df_filtrado = df[colunas]
+        df_filtrado = df[colunas_selecionadas]
 
         # Formatar os dados
         df_formatado = formatar_dados(df_filtrado)
@@ -91,11 +116,11 @@ btn_selecionar_arquivo.pack(pady=5)
 label_arquivo = tk.Label(janela, text="Nenhum arquivo selecionado.", fg="gray")
 label_arquivo.pack(pady=5)
 
-label_colunas = tk.Label(janela, text="Digite os nomes das colunas separados por vírgula:")
+label_colunas = tk.Label(janela, text="Selecione as colunas desejadas:")
 label_colunas.pack(pady=5)
 
-entry_colunas = tk.Entry(janela, width=50)
-entry_colunas.pack(pady=5)
+listbox_colunas = tk.Listbox(janela, selectmode=tk.MULTIPLE, width=50, height=10)
+listbox_colunas.pack(pady=5)
 
 btn_processar = tk.Button(janela, text="Converter para TXT", command=processar_arquivo, bg="green", fg="white")
 btn_processar.pack(pady=10)
