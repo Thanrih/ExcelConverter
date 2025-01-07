@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -26,7 +27,6 @@ def carregar_colunas():
     except Exception as e:
         messagebox.showerror("Erro", f"Erro ao carregar colunas: {str(e)}")
 
-# Variável global para armazenar as colunas selecionadas
 colunas_selecionadas = []
 
 def adicionar_coluna():
@@ -55,42 +55,51 @@ def atualizar_listbox_adicionadas():
         listbox_colunas_adicionadas.insert(tk.END, coluna)
 
 def formatar_dados(df):
-    """
-    Formata os campos 'MES_ANO_DIREITO' (data), 'CPF' e 'CNPJ' no DataFrame.
-    """
-    # Formatar a coluna de data
-    if 'MES_ANO_DIREITO' in df.columns:
-        df['MES_ANO_DIREITO'] = pd.to_datetime(df['MES_ANO_DIREITO'], errors='coerce')
-        df['MES_ANO_DIREITO'] = df['MES_ANO_DIREITO'].fillna("").dt.strftime('%d/%m/%Y')
 
-    # Formatar o CPF
+    for coluna in df.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns:
+            df[coluna] = df[coluna].apply(lambda x: x.strftime('%d/%m/%Y') if pd.notnull(x) else "")
+
     if 'CPF' in df.columns:
-        df['CPF'] = df['CPF'].fillna("").astype(str).str.replace(r'[^\d]', '', regex=True)  # Remove caracteres não numéricos
+    # Substitui valores NaN por uma string vazia e remove caracteres não numéricos
+        df['CPF'] = df['CPF'].fillna("").astype(str).str.replace(r'[^\d]', '', regex=True)
         
-        # Garante que o CPF tenha exatamente 11 dígitos
-        df['CPF'] = df['CPF'].apply(lambda x: x[:11] if len(x) > 11 else x.zfill(11))  # Trunca ou preenche com zeros
+        # Remove o último caractere, se existir
+        df['CPF'] = df['CPF'].apply(lambda x: x[:-1] if len(x) > 0 else x)
         
-        # Aplica a máscara padrão
-        df['CPF'] = df['CPF'].str.replace(
-            r'(\d{3})(\d{3})(\d{3})(\d{2})', r'\1.\2.\3-\4', regex=True
-        )  #  # Aplica a máscara padrão
+        # Garante que o CPF tenha exatamente 11 dígitos (trunca ou adiciona zeros à esquerda)
+        def ajustar_cpf(cpf):
+            cpf = cpf[:11] if len(cpf) > 11 else ('0' * (11 - len(cpf))) + cpf
+            return cpf
+        
+        df['CPF'] = df['CPF'].apply(ajustar_cpf)
+        print(df['CPF'])
+        # Aplica a máscara padrão do CPF
+        def aplicar_mascara(cpf):
+            return f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}" if len(cpf) == 11 else cpf
+        
+        df['CPF'] = df['CPF'].apply(aplicar_mascara)
 
-    # Formatar o CNPJ
+
+
     if 'CNPJ' in df.columns:
-        df['CNPJ'] = df['CNPJ'].fillna("").astype(str).str.replace(r'[^\d]', '', regex=True)
-        df['CNPJ'] = df['CNPJ'].apply(lambda x: x.zfill(14) if len(x) < 14 else x)  # Garante 14 dígitos
-        df['CNPJ'] = df['CNPJ'].str.replace(
-            r'(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})', r'\1.\2.\3/\4-\5', regex=True
-        )  # Aplica a máscara padrão
+        # Remove caracteres não numéricos
+        df.loc[:, 'CNPJ'] = df['CNPJ'].fillna("").astype(str).str.replace(r'[^\d]', '', regex=True)
+        # Remove CNPJs inválidos (com mais de 14 dígitos ou vazios)
+        df.loc[:, 'CNPJ'] = df['CNPJ'].apply(lambda x: x if len(x) <= 14 else x[:14])
+        # Adiciona zeros à esquerda para garantir 14 dígitos
+        df.loc[:, 'CNPJ'] = df['CNPJ'].apply(lambda x: x.zfill(14))
+        # Aplica a máscara de CNPJ
+        df.loc[:, 'CNPJ'] = df['CNPJ'].str.replace(r'(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})', r'\1.\2.\3/\4-\5', regex=True)
 
-    # Converter colunas numéricas para int, se possível
-    for col in df.select_dtypes(include=['float']):
-        df[col] = df[col].fillna(0).astype(int)  # Converte para int, substituindo NaN por 0
+    # Remove duplicatas novamente após formatações
 
     return df
 
+
+
+
 def processar_arquivo():
-    """Processa o arquivo Excel e salva como TXT"""
+    """Processa o arquivo Excel e salva como TXT com ; no final de cada linha"""
     try:
         if not excel_file:
             raise ValueError("Por favor, selecione um arquivo Excel.")
@@ -108,10 +117,10 @@ def processar_arquivo():
         # Filtrar as colunas na ordem selecionada
         df_filtrado = df[colunas_selecionadas]
 
-        df_formatado = df_filtrado.drop_duplicates()
         # Formatar os dados
-        df_formatado = formatar_dados(df_formatado)
+        df_formatado = formatar_dados(df_filtrado)
 
+        # Adiciona ';' ao final de cada linha, ignorando linhas idênticas
         output_file = filedialog.asksaveasfilename(
             title="Salvar arquivo como",
             defaultextension=".txt",
@@ -120,9 +129,22 @@ def processar_arquivo():
         if not output_file:
             raise ValueError("Nenhum caminho para salvar foi selecion.")
 
-        df_formatado.to_csv(output_file, sep=';', index=False)
+        # Salva o arquivo com separador ';' e preserva caracteres especiais
+        temp_file = output_file + "_temp"
+        df_formatado.to_csv(temp_file, sep=';', index=False, header=True)
+        with open(temp_file, 'r', encoding='utf-8') as infile, open(output_file, 'w', encoding='utf-8') as outfile:
+            previous_line = None
+            for i, line in enumerate(infile):
+                if i == 0:  # Primeira linha (cabeçalho)
+                    outfile.write(line.strip() + ';\n')
+                    print(i)
+                else:  # Demais linhas (dados)
+                    if line.strip() != previous_line:  # Ignora linhas idênticas
+                        outfile.write(line.strip() + ';\n')
+                    previous_line = line.strip()
 
         messagebox.showinfo("Sucesso", f"Arquivo salvo com sucesso em:\n{output_file}")
+        os.remove(temp_file)
 
     except Exception as e:
         messagebox.showerror("Erro", f"Ocorreu um erro: {str(e)}")
